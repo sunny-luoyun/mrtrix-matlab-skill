@@ -1,21 +1,16 @@
+---
+name: mrtrix-matlab-skill
+description: >-
+  MRtrix3 扩散磁共振图像处理 skill，覆盖数据整理、预处理、DTI、FOD/CSD、纤维追踪、FBA 纤维分析、网络矩阵构建、统计分析等完整流程。
+  用户提及弥散/扩散磁共振/dMRI/DTI/DKI/FBA/FOD/纤维/MRtrix3 时自动触发。
+---
+
 # mrtrix-matlab 扩散磁共振图像处理技能
 
 ## 项目路径配置
 
-本技能需要知道 mrtrix-matlab 项目在你电脑上的位置才能工作。  
-请用文本编辑器打开本文件，将下方路径改为你的实际路径：
-
-```text
-MRTRIX_MATLAB_HOME = /path/to/your/mrtrix-matlab
-```
-
-例如：
-- macOS: `MRTRIX_MATLAB_HOME = /Users/me/code/mrtrix-matlab`
-- Linux: `MRTRIX_MATLAB_HOME = /home/me/mrtrix-matlab`
-- Windows: `MRTRIX_MATLAB_HOME = C:\Users\me\mrtrix-matlab`
-
-AI 每次读取本文件时会自动使用该路径。  
-**如果你换了电脑或移动了项目目录，记得更新这个路径。**
+`config.txt` 文件中配置了 `MRTRIX_MATLAB_HOME`。
+开始处理任务前，先读取 `config.txt` 获取路径。
 
 ---
 

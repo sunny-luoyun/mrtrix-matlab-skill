@@ -20,13 +20,11 @@ ln -s $(pwd)/mrtrix-matlab-skill ~/.config/opencode/skills/mrtrix-matlab-skill
 
 ## 首次使用配置
 
-**重要**：安装后，用文本编辑器打开 `SKILL.md`，找到文件顶部的「项目路径配置」段落，
+**重要**：安装后，用文本编辑器打开 `config.txt`，
 将 `MRTRIX_MATLAB_HOME` 改为你电脑上 `mrtrix-matlab` 项目的实际路径：
 
 ```text
-MRTRIX_MATLAB_HOME = /Users/你的用户名/code/mrtrix-matlab
+MRTRIX_MATLAB_HOME = /path/to/your/mrtrix-matlab
 ```
 
-AI 每次读取本文件时会自动使用你填的路径，**一次配置永久有效**。
-如果你换了电脑或移动了项目目录，记得更新这个路径。
 
