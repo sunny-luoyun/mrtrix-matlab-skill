@@ -1,59 +1,128 @@
-# stats — 统计分析模块
+# 统计分析 CLI 参考
 
-## 用途
+## 图像统计
 
-对处理后数据进行统计分析和推断。支持 4 种分析类型。
+```bash
+# ROI 统计
+mrstats image.mif -mask roi.mif -output mean,std,min,max,count
 
-## 文件清单
+# 多图像均值
+mrmath sub-*/fa.mif mean group_mean_fa.mif -axis 3
+mrmath sub-*/fa.mif std group_std_fa.mif -axis 3
+```
 
-### tckstats.m（纤维束统计）
+## 簇统计（Voxel 级别）
 
-**App Designer 界面**。对 .tck 纤维束文件进行统计：
+```bash
+mrclusterstats input_images.txt design.txt contrast.txt mask.mif stats/ \
+  -nshifts 5000 \
+  -threshold 2.3
+```
 
-- 统计量：均值 / 中位数 / 标准差 / 最小值 / 最大值 / 计数
-- 输出：直方图 + 导出数据
-- 输入：.tck 文件
+## Fixel 统计
 
-### mrstats.m（图像 ROI 统计）
+见 FBA 参考（Step 20），核心命令：
 
-**App Designer 界面**。对 .mif/.nii 图像进行 ROI 分析：
+```bash
+fixelcfestats subject_files.txt design.txt contrast.txt fixel_mask/ connectivity/ stats/ \
+  -cfe_h 2.0 -cfe_e 0.5 -cfe_c 0.5 \
+  -nshifts 5000
+```
 
-- ROI 类型：全脑 / 球形 ROI / MASK 文件 ROI
-- 统计量：均值 / 中位数 / 标准差 / 体积 / 体素数
-- 输入：.mif 或 .nii 图像 + ROI 定义
+## 连接组统计
 
-### mrclusterstats.m（簇水平统计）
+```bash
+connectomestats connectome_list.txt design.txt contrast.txt stats/ \
+  -options edge \
+  -nshifts 5000
+```
 
-**App Designer 界面**。基于置换检验的簇水平推断：
+## 纤维统计
 
-- 实验设计类型：
-  - 独立样本 t 检验（双样本）
-  - 配对 t 检验
-  - 单因素方差分析
-  - 双因素方差分析
-- 输入：4D 图像（.mif/.nii）+ 设计矩阵 + 对比矩阵
-- 输出：簇水平校正后的统计结果
-- 核心命令：`mrclusterstats`
+```bash
+tckstats tracks.tck -output length,weighted_length
+```
 
-### connectomestats.m（连接组统计）
+## 设计矩阵与对比矩阵说明
 
-**App Designer 界面**。基于 NBS / TFNBS 的连接组统计分析：
+`design.txt` 和 `contrast.txt` 是所有统计命令的输入文件。
 
-- 方法：NBS（Network-Based Statistics）或 TFNBS
-- 实验设计：多种实验设计支持
-- 输入：连接矩阵 + 设计矩阵 + 对比矩阵
-- 核心命令：`connectomestats`
+### 格式规则
 
-## 典型分析流程
+- **design.txt**: 每行一个被试，每列一个变量（多数为组别/协变量）
+- **contrast.txt**: 每行一个对比，每列对应 design.txt 中的变量
+- 用空格或 tab 分隔
+- 行数 = 被试数，列数 = 变量数
 
-1. 准备数据（确保已有前序处理结果）
-2. 创建设计矩阵（被试分组信息）
-3. 创建对比矩阵（要检验的假设）
-4. 运行统计检验
-5. 查看结果
+### 常见实验设计模板
 
-## 注意事项
+#### 两组独立样本（每组 3 个被试）
 
-- 该模块不依赖其他模块，可以直接分析任意模块的输出
-- 簇统计和连接组统计基于置换检验，结果稳定但耗时
-- 设计矩阵的创建需谨慎，错误的对比会得出无效结果
+```
+# design.txt: [截距, 组A, 组B]
+1 1 0    # sub-001 (A组)
+1 1 0    # sub-002 (A组)
+1 1 0    # sub-003 (A组)
+1 0 1    # sub-004 (B组)
+1 0 1    # sub-005 (B组)
+1 0 1    # sub-006 (B组)
+
+# contrast.txt: A组 > B组
+0 1 -1
+```
+
+#### 两组配对样本（前后对比）
+
+```
+# design.txt: [截距, 后测-前测]
+1 0    # sub-001 (前测)
+1 0    # sub-002 (前测)
+1 0    # sub-003 (前测)
+1 1    # sub-001 (后测)
+1 1    # sub-002 (后测)
+1 1    # sub-003 (后测)
+
+# contrast.txt: 后测 > 前测
+0 1
+```
+
+#### 单因素三组方差分析（每组 2 个被试）
+
+```
+# design.txt: [截距, 组B, 组C] (A为基线)
+1 0 0  # sub-001 (A组)
+1 0 0  # sub-002 (A组)
+1 1 0  # sub-003 (B组)
+1 1 0  # sub-004 (B组)
+1 0 1  # sub-005 (C组)
+1 0 1  # sub-006 (C组)
+
+# contrast.txt:
+# 主效应 F 检验（B vs A, C vs A 联合检验）
+0 1 0
+0 0 1
+```
+
+#### 含协变量（年龄作为协变量）
+
+```
+# design.txt: [截距, 组别, 年龄]
+1 0 25  # sub-001 (对照, 25岁)
+1 0 30  # sub-002 (对照, 30岁)
+1 0 28  # sub-003 (对照, 28岁)
+1 1 27  # sub-004 (患者, 27岁)
+1 1 32  # sub-005 (患者, 32岁)
+1 1 29  # sub-006 (患者, 29岁)
+
+# contrast.txt: 患者 vs 对照（控制年龄）
+0 1 0
+```
+
+### 生成建议
+
+与用户确认以下信息后，AI 自动生成 design.txt 和 contrast.txt：
+
+1. **分组信息**：有几组？每组多少被试？
+2. **对比方式**：哪两组比较？是否配对？
+3. **协变量**：是否有年龄、性别等协变量需要控制？
+4. **检验方向**：单侧（A > B）还是双侧（A ≠ B）？

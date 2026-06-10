@@ -1,62 +1,126 @@
-# fiber — 纤维重建模块
+# 纤维追踪 CLI 参考
 
-## 用途
+## 流程
 
-从 FOD 数据进行全脑或 ROI 纤维追踪，支持 SIFT/SIFT2 滤波和 Track Density Imaging (TDI) 图生成。
+FOD → 5TT 生成 → `tckgen` → SIFT → TDI
 
-## 文件清单
+## 命令序列
 
-### fiber.m（App Designer 主界面）
+### 1. 5TT 和 GMWMI 生成
 
-**入口函数**。配置追踪参数、ROI、滤波选项。
+```bash
+5ttgen fsl T1.nii.gz 5tt.mif
+5tt2gmwmi 5tt.mif gmwmi.mif
+```
 
-### 核心处理函数
+### 2. 全脑纤维追踪
 
-| 函数 | 对应命令 | 说明 |
-|------|---------|------|
-| `fiberbuild.m` | `tckgen` | 全脑或 ROI 纤维追踪，自动选择最近 FOD 文件 |
-| `sift.m` | `tcksift` | SIFT 滤波，减少纤维数量但保持密度分布 |
-| `weightc.m` | `tcksift2` | SIFT2 权重计算，为每条纤维分配权重 |
-| `tck2nii.m` | `tckmap` | TDI 图生成，支持平滑和权重 |
+```bash
+tckgen wm_fod_norm.mif tracks.tck \
+  -algorithm iFOD2 \
+  -act 5tt.mif \
+  -backtrack \
+  -seed_gmwmi gmwmi.mif \
+  -select 1000000 \
+  -maxlength 250 \
+  -minlength 10 \
+  -step 0.5 \
+  -angle 45 \
+  -power 0.33 \
+  -crop_at_gmwmi
+```
 
-### ROI 工具
+#### 追踪算法选择（-algorithm）
 
-| 函数 | 说明 |
-|------|------|
-| `ROIListDialog.m` | ROI 定义对话框，支持：球形 ROI、MASK 文件 ROI、AAL 模板 ROI、Brainnetome 模板 ROI |
-| `utils_tal2icbm_spm.m` | Talairach → ICBM SPM 坐标转换 |
+| 算法 | 全名 | 适用场景 |
+|------|------|---------|
+| `iFOD2` | 2nd-order Integration over FODs | **默认推荐**，基于 FOD 的概率追踪 |
+| `SD_Stream` | Streamline from SD | 基于 FOD 的确定性追踪 |
+| `Tensor_Det` | Deterministic tractography | 基于张量的确定性追踪（需 dt.mif） |
+| `Tensor_Prob` | Probabilistic tractography | 基于张量的概率追踪（需 dt.mif） |
+| `FACT` | Fiber Assignment by Continuous Tracking | 确定性纤维赋值追踪（需 dt.mif） |
 
-## 追踪参数
+> **注意**：Tensor_Det / Tensor_Prob / FACT 需要 `dwi2tensor` 生成的张量图像作为输入，
+> 不能直接用 FOD。如用这些算法，输入改为 `dt.mif` 并配合 `-grad` 选项。
 
-| 参数 | 默认值 | 说明 |
+关键参数说明：
+
+| 参数 | 推荐值 | 说明 |
 |------|--------|------|
-| 角度 | 45° | 最大转弯角度 |
-| 最小长度 | 10 mm | 纤维最小长度 |
-| 最大长度 | 200 mm | 纤维最大长度 |
-| FOD 阈值 | 0.1 | FOD 幅值阈值，低于此值停止追踪 |
-| 步数 | 1000 | 追踪迭代步数 |
-| 纤维数量 | 500000 | 输出纤维总数 |
+| `-algorithm` | iFOD2 | 追踪算法（iFOD2 / SD_Stream / Tensor_Det / Tensor_Prob / FACT）|
+| `-select` | 1M-10M | 输出纤维数，越多越密，文件越大 |
+| `-maxlength` | 250-300 | 最长纤维长度 (mm) |
+| `-minlength` | 10-20 | 最短纤维长度 (mm) |
+| `-step` | 0.5-1.0 | 追踪步长 (mm) |
+| `-angle` | 30-60 | 最大转向角 (度) |
+| `-seed_gmwmi` | gmwmi.mif | 从灰质-白质边界播种 |
+| `-seed_dynamic` | fod.mif | 动态播种（按 FOD 幅值） |
 
-## SIFT 参数
+### 3. SIFT 滤波
 
-| 参数 | 说明 |
-|------|------|
-| 纤维数量 | SIFT 滤波后保留的纤维目标数 |
-| 迭代次数 | 默认 20 |
+```bash
+tcksift tracks.tck wm_fod_norm.mif tracks_sift.tck \
+  -act 5tt.mif \
+  -term_number 200000
+```
 
-## TDI 参数
+### 4. SIFT2（替代 SIFT，输出权重而非子集）
 
-| 参数 | 说明 |
-|------|------|
-| 体素大小 | 输出 TDI 图的分辨率（mm） |
-| 平滑 | 高斯平滑核大小（mm） |
-| 使用权重 | 是否使用 SIFT2 权重 |
+```bash
+tcksift2 tracks.tck wm_fod_norm.mif weights.csv \
+  -act 5tt.mif
+```
 
-## 处理流程
+### 5. TDI 图（5 种对比度）
 
-1. 选择追踪模式：全脑追踪 / ROI 追踪
-2. 配置追踪参数（角度/长度/阈值/纤维数）
-3. 执行追踪 → `fiberbuild.m`
-4. 可选：SIFT 滤波 → `sift.m`
-5. 可选：SIFT2 权重 → `weightc.m`
-6. 可选：TDI 图 → `tck2nii.m`
+```bash
+# 对比度 1: tdi（默认）—— 纤维密度图，方向编码彩色（-dec）
+tckmap tracks_sift.tck tdi.mif -vox 1.0 -dec -template wm_fod_norm.mif
+
+# 对比度 2: length —— 纤维长度图，每个体素内纤维的平均长度
+tckmap tracks_sift.tck length.mif -contrast length -vox 1.0 -template wm_fod_norm.mif
+
+# 对比度 3: invlength —— 纤维长度倒数图
+tckmap tracks_sift.tck invlength.mif -contrast invlength -vox 1.0 -template wm_fod_norm.mif
+
+# 对比度 4: fod_amp —— FOD 幅值图，沿纤维方向的 FOD 幅值
+tckmap tracks_sift.tck fod_amp.mif -contrast fod_amp -vox 1.0 -template wm_fod_norm.mif
+
+# 对比度 5: curvature —— 纤维曲率图
+tckmap tracks_sift.tck curvature.mif -contrast curvature -vox 1.0 -template wm_fod_norm.mif
+
+# 可选: 高斯平滑
+# tckmap tracks_sift.tck tdi_smooth.mif -vox 1.0 -dec -template wm_fod_norm.mif -smooth 3
+```
+
+## ROI 追踪（需要在特定 ROI 内/间追踪）
+
+```bash
+# 从 ROI 播种
+tckgen wm_fod_norm.mif tracks_roi.tck \
+  -act 5tt.mif \
+  -seed_image roi.mif \
+  -select 50000
+
+# ROI 间纤维（包含两个 ROI）
+tckgen wm_fod_norm.mif tracks_between.tck \
+  -act 5tt.mif \
+  -seed_image roi1.mif \
+  -include roi2.mif \
+  -select 50000
+
+# 排除特定区域
+tckgen wm_fod_norm.mif tracks_exclude.tck \
+  -act 5tt.mif \
+  -seed_gmwmi gmwmi.mif \
+  -exclude exclude_mask.mif \
+  -select 1000000
+```
+
+## 质量检查
+
+```bash
+tckinfo tracks.tck
+tckstats tracks.tck
+mrview wm_fod_norm.mif -tractography.load tracks_sift.tck
+```

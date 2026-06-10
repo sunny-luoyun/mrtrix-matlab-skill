@@ -1,60 +1,46 @@
-# map — 纤维网络矩阵构建模块
+# 连接组矩阵 CLI 参考
 
-## 用途
+## 流程
 
-从纤维追踪结果构建脑连接组矩阵（connectome），支持多种分配策略和边权重方案。
+纤维追踪结果 + 脑图谱 → `tck2connectome` → 连接组矩阵
 
-## 文件清单
+## 命令
 
-### build_map.m（App Designer 主界面）
+```bash
+# 基本连接组（计数）
+tck2connectome tracks_sift.tck atlas.mif connectome.csv
 
-**入口函数**。配置网络构建参数。
+# 带权重（SIFT2 权重或 FA 等标量）
+tck2connectome tracks_sift.tck atlas.mif connectome_weighted.csv \
+  -tck_weights_in weights.csv
 
-### buildmap.m
+# 按体素体积归一化（invnodevol）
+tck2connectome tracks_sift.tck atlas.mif connectome_norm.csv \
+  -scale_invnodevol \
+  -tck_weights_in weights.csv
 
-**功能**：执行连接矩阵构建。
+# 对称化连接组
+connectomeedit connectome.csv connectome_sym.csv -symmetrise
+```
 
-**核心命令**：`tck2connectome`
+## 图谱选项
 
-## 参数
+| 图谱 | 体数 | 说明 |
+|------|------|------|
+| aal.mif | 116 | AAL 模板 |
+| Brainnetome | 246 | Brainnetome 图谱 |
+| Desikan-Killiany | 84 | 基于 FreeSurfer |
 
-### 纤维分配策略（assign）
+图谱需要先通过 `labelconvert` 转为 MRtrix 兼容格式：
 
-| 选项 | 说明 |
-|------|------|
-| `voxels` | 基于体素的分配（默认） |
-| `radial` | 径向搜索分配 |
-| `forward` | 正向分配 |
-| `reverse` | 反向分配 |
+```bash
+labelconvert atlas.nii.gz LUT_in.txt LUT_out.txt atlas.mif
+```
 
-### 边权重（scale）
+## 统计
 
-| 选项 | 说明 |
-|------|------|
-| `length` | 纤维长度作为权重 |
-| `invlength` | 纤维长度的倒数 |
-| `invnodevol` | 节点体积的倒数 |
-
-### 其他选项
-
-| 参数 | 说明 |
-|------|------|
-| 对称化 | 矩阵是否对称 |
-| 对角线置零 | 是否去除自连接 |
-| 加权 | 是否加权（binary 或 weighted） |
-| 输出 txt | 是否额外输出文本格式 |
-
-## 图谱路径
-
-- AAL: `Templates/aal.nii`
-- Brainnetome: `Templates/BrainnetomeAtlas_BNA_MPM_thr25_1.25mm.nii.gz`
-- MNI152: `Templates/MNI152.nii.gz`
-
-## 输出
-
-连接矩阵保存到 `brainnet/` 目录，格式为 .txt 或 .csv。
-
-## 前置条件
-
-- 已完成纤维追踪（fiber 模块），有 .tck 文件
-- 已有脑图谱文件（AAL/Brainnetome）
+```bash
+# 连接组级别统计
+connectomestats connectome.csv design.txt contrast.txt stats/ \
+  -options edge
+```

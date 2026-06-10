@@ -1,88 +1,362 @@
-# fba — FBA 纤维分析模块
+# FBA CLI 参考（21 步完整流程）
 
-## 用途
+## 流程
 
-Fixel-Based Analysis（基于固定点的纤维分析）的标准 21 步流程。用于全脑体素水平的纤维特异性分析。
+```
+个体处理（Step 1-6）→ 模版构建（Step 7）→ 配准（Step 8-9）
+→ Fixel分析（Step 10-16）→ 纤维追踪/连接（Step 17-18）
+→ 平滑/统计（Step 19-20）→ 可视化（Step 21）
+```
 
-## 主界面
+数据目录结构建议：
 
-| 函数 | 说明 |
+```
+FBA/
+├── sub-001/          # 每个被试独立目录
+├── sub-002/
+├── templates/        # 模版和群体文件
+└── stats/            # 统计结果
+```
+
+每个被试目录下应有：DWI (.mif/.nii)、bvecs、bvals、mask。
+
+---
+
+## Step 1: 估计响应函数
+
+对每个被试：
+
+```bash
+# dhollander 算法（多组织，推荐）
+dwi2response dhollander dwi.mif wm.txt gm.txt csf.txt -mask mask.mif
+
+# 或 tournier 算法（单组织）
+dwi2response tournier dwi.mif response.txt -mask mask.mif
+```
+
+## Step 2: 计算平均响应函数
+
+把所有被试的响应函数文件收集到一起，取平均：
+
+```bash
+responsemean sub-*/wm.txt group_average_wm.txt
+responsemean sub-*/gm.txt group_average_gm.txt
+responsemean sub-*/csf.txt group_average_csf.txt
+```
+
+## Step 3: DWI 上采样
+
+```bash
+mrgrid dwi.mif regrid -vox 1.25 dwi_upsampled.mif
+# -vox 1.25 与 Brainnetome 图谱分辨率匹配
+# 可根据需要调整，如 1.0 或 1.5
+```
+
+## Step 4: 上采样后掩膜
+
+```bash
+dwi2mask dwi_upsampled.mif mask_upsampled.mif
+```
+
+## Step 5: CSD 计算
+
+```bash
+dwi2fod msmt_csd dwi_upsampled.mif \
+  group_average_wm.txt wm_fod.mif \
+  group_average_gm.txt gm.mif \
+  group_average_csf.txt csf.mif \
+  -mask mask_upsampled.mif
+```
+
+## Step 6: FOD 标准化
+
+```bash
+mtnormalise wm_fod.mif wm_fod_norm.mif \
+  gm.mif gm_norm.mif \
+  csf.mif csf_norm.mif \
+  -mask mask_upsampled.mif
+```
+
+## Step 7: 群体模版构建
+
+详见 `references/register.md`「阶段二：Step 7」。
+
+推荐使用 symlink 方式（避免移动大量数据）：
+
+```bash
+# 建立 symlink 目录收集所有被试 FOD 和 mask
+mkdir -p templates/fod_input templates/mask_input
+for sub in sub-001 sub-002 sub-003; do
+  ln -sf ${PWD}/sub-001/wmfod_norm.mif templates/fod_input/sub-001.mif
+  ln -sf ${PWD}/sub-001/dwi_mask_upsampled.mif templates/mask_input/sub-001.mif
+done
+
+# 构建群体模板（带掩膜约束）
+population_template \
+  templates/fod_input/ \
+  -mask_dir templates/mask_input/ \
+  templates/wmfod_template.mif \
+  -voxel_size 1.25
+```
+
+关键参数：
+
+| 参数 | 说明 |
 |------|------|
-| `fba.m` | FBA 主界面，4 个按钮：个体处理 / 模版构建 / Fixel 分析 / 统计分析 |
-| `fba_subject.m` | 个体处理界面（step 1-6） |
-| `fba_template.m` | 模版构建界面（step 7） |
-| `fba_fixel.m` | Fixel 分析界面（step 8-19） |
-| `fba_stats.m` | 统计分析界面（step 20） |
+| `-mask_dir` | 个体掩膜目录，约束配准范围 |
+| `-voxel_size` | 模板体素大小，与上采样一致（1.25mm） |
+| `-nl` | 使用非线性配准（推荐） |
+| `-nl_scale` | 非线性缩放层级，默认 `0.25,0.5,0.75,1.0` |
+| `-nl_niter` | 每层迭代次数，默认 `5,5,10,20` |
 
-## 21 步流程详解
+## Step 8: 非线性配准到模版
 
-### 个体处理（步骤 1-6）
+详见 `references/register.md`「阶段二：Step 8」。
 
-| 步骤 | 函数 | 命令 | 说明 |
-|------|------|------|------|
-| 1 | `step1_resp.m` | `dwi2response` | 复制 DWI，估计响应函数（dhollander/tournier） |
-| 2 | `step2_respmean.m` | `responsemean` | 计算全组平均响应函数（WM/GM/CSF） |
-| 3 | `step3_upsample.m` | `mrgrid regrid` | DWI 上采样到指定体素大小（默认 1.25mm） |
-| 4 | `step4_mask.m` | `dwi2mask` | 为上采样 DWI 创建脑掩膜 |
-| 5 | `step5_csd.m` | `dwi2fod msmt_csd` / `dwi2fod csd` | 计算 FOD |
-| 6 | `step6_normalise.m` | `mtnormalise` | FOD 标准化 |
+```bash
+mrregister wmfod_norm.mif \
+  -mask1 dwi_mask_upsampled.mif \
+  templates/wmfod_template.mif \
+  -nl_warp subject2template_warp.mif \
+            template2subject_warp.mif \
+  -nl_scale 0.5,0.75,1.0 \
+  -nl_niter 5,5,15 \
+  -force
+```
 
-### 模版构建（步骤 7）
+参数详解：
 
-| 步骤 | 函数 | 命令 | 说明 |
-|------|------|------|------|
-| 7 | `step7_template.m` | `population_template` | 构建群体 FOD 模版，选择全部或部分被试 |
+| 参数 | 含义 | 推荐值 |
+|------|------|--------|
+| `-mask1` | 源图像掩膜（加速 + 约束） | 上采样 mask |
+| `-nl_warp` | 输出变形场（正向 + 反向） | - |
+| `-nl_scale` | 多分辨率缩放层级 | `0.5,0.75,1.0` |
+| `-nl_niter` | 每层迭代次数 | `5,5,15`（最后层精调） |
+| `-type` | 配准类型 | `nonlinear`（默认已包含） |
 
-### 配准（步骤 8-9）
+## Step 9: 掩膜交集
 
-| 步骤 | 函数 | 命令 | 说明 |
-|------|------|------|------|
-| 8 | `step8_register.m` | `mrregister` | 每个被试 FOD 非线性配准到群体模版 |
-| 9 | `step9_mask_inter.m` | — | 个体掩膜变换到模版空间，取交集 |
+详见 `references/register.md`「阶段二：Step 9」。
 
-### Fixel 分析（步骤 10-16）
+```bash
+# 个体 mask → 模版空间
+mrtransform dwi_mask_upsampled.mif \
+  -warp subject2template_warp.mif \
+  -interp nearest -datatype bit \
+  dwi_mask_in_template_space.mif -force
 
-| 步骤 | 函数 | 命令 | 说明 |
-|------|------|------|------|
-| 10 | `step10_fixel_mask.m` | `fod2fixel` | 从模版 FOD 生成 fixel 掩膜 |
-| 11 | `step11_warp_fod.m` | `mrtransform` | 个体 FOD 变换到模版空间 |
-| 12 | `step12_fd.m` | `fod2fixel -afd` | 计算 Fiber Density (FD) |
-| 13 | `step13_reorient.m` | `fixelreorient` | Fixel 方向重定向 |
-| 14 | `step14_corresp.m` | `fixelcorrespondence` | 建立个体与模版 fixel 对应关系 |
-| 15 | `step15_fc.m` | `warp2metric -fc` | 计算 Fiber Cross-section (FC) |
-| 16 | `step16_log_fdc.m` | — | 计算 log(FC) 和 FDC = FD × FC |
+# 所有 mask 取交集
+for sub in sub-*; do
+  mrtransform $sub/dwi_mask_upsampled.mif \
+    -warp $sub/subject2template_warp.mif \
+    -interp nearest -datatype bit \
+    $sub/dwi_mask_in_template_space.mif -force
+done
+mrmath sub-*/dwi_mask_in_template_space.mif min \
+  templates/template_mask.mif -datatype bit -force
+```
 
-### 纤维追踪与连接（步骤 17-18）
+## Step 10: Fixel 掩膜
 
-| 步骤 | 函数 | 命令 | 说明 |
-|------|------|------|------|
-| 17 | `step17_tckgen.m` | `tckgen` + `tcksift` | 模版空间纤维追踪 + SIFT |
-| 18 | `step18_connect.m` | `fixelconnectivity` | 从纤维束构建 fixel 连接矩阵 |
+```bash
+fod2fixel \
+  -mask templates/template_mask.mif \
+  -fmls_peak_value 0.1 \
+  templates/wmfod_template.mif \
+  templates/fixel_mask \
+  -force
+```
 
-### 平滑与统计（步骤 19-20）
+> `-fmls_peak_value`：FOD 峰值阈值，低于此值的 fixel 被剔除。默认 0.1，对于噪声大或分辨率低的数据可适当降低（如 0.05）。
 
-| 步骤 | 函数 | 命令 | 说明 |
-|------|------|------|------|
-| 19 | `step19_smooth.m` | `fixelfilter smooth` | 对 FD/log_FC/FDC 进行平滑 |
-| 20 | `step20_stats.m` | `fixelcfestats` | 基于 fixel 的置换检验统计分析 |
+## Step 11: FOD 变换到模版空间（不重定向）
 
-### 可视化（步骤 21）
+```bash
+# -reorient_fod no: 暂不重定向，后续 step13 fixelreorient 独立处理
+mrtransform wmfod_norm.mif \
+  -warp subject2template_warp.mif \
+  -reorient_fod no \
+  fod_in_template_space_NOT_REORIENTED.mif \
+  -force
+```
 
-| 步骤 | 函数 | 命令 | 说明 |
-|------|------|------|------|
-| 21 | `step21_view.m` | `mrview` | 可视化 FOD 模版 |
+## Step 12: 计算 FD（Fiber Density）
 
-## 关键参数
+从未重定向的 FOD 中提取 AFD（Apparent Fiber Density）：
 
-- **上采样体素大小**：默认 1.25mm（与 Brainnetome 图谱匹配）
-- **CSD 算法**：msmt_csd 或 csd
-- **响应函数算法**：dhollander（推荐，多组织）
-- **置换检验次数**：默认 5000 次
-- **平滑核大小**：默认 10mm
+```bash
+fod2fixel -afd fod_in_template_space_NOT_REORIENTED.mif \
+  templates/fixel_mask \
+  fixel_in_template_space_NOT_REORIENTED \
+  -force
+```
 
-## 需要注意
+输出目录 `fixel_in_template_space_NOT_REORIENTED/` 包含 `index.mif` 和 `fd.mif`。
 
-- FBA 是独立流程，有自己的预处理子流程，不依赖 pre 模块
-- 但依赖 FOD 计算（可在步骤 1 中完成，也可使用已有的 fod 模块结果）
-- 步骤 7 模版构建耗时，建议使用服务器
-- 步骤 20 统计检验耗时，置换次数越多越准确但越慢
+## Step 13: Fixel 方向重定向
+
+用 warp 场重定向 fixel 方向：
+
+```bash
+fixelreorient \
+  fixel_in_template_space_NOT_REORIENTED \
+  subject2template_warp.mif \
+  fixel_in_template_space \
+  -force
+```
+
+## Step 14: Fixel 对应关系
+
+建立个体 fixel 到模板 fixel 的对应关系：
+
+```bash
+fixelcorrespondence \
+  fixel_in_template_space/fd.mif \
+  templates/fixel_mask \
+  templates/fd \
+  sub-001.mif \
+  -force
+```
+
+## Step 15: 计算 FC（Fiber Cross-section）
+
+用变形场提取纤维横截面积变化：
+
+```bash
+mkdir -p templates/fc
+warp2metric \
+  subject2template_warp.mif \
+  -fc templates/fixel_mask \
+  templates/fc \
+  sub-001.mif \
+  -force
+```
+
+## Step 16: 计算 log(FC) 和 FDC
+
+```bash
+mrcalc fc.mif -log log_fc.mif
+mrcalc fd_corresp.mif fc.mif -multiply fdc.mif
+```
+
+## Step 17: 模版空间纤维追踪
+
+在模版 FOD 上做追踪，用于构建 fixel-fixel 连接矩阵：
+
+```bash
+# 全脑追踪
+tckgen templates/fod_template.mif templates/tracks.tck \
+  -seed_dynamic templates/fod_template.mif \
+  -select 20000000 \
+  -maxlength 250 \
+  -minlength 10 \
+  -step 0.5
+
+# SIFT 滤波
+tcksift templates/tracks.tck templates/fod_template.mif \
+  templates/tracks_sift.tck \
+  -term_number 2000000
+```
+
+## Step 18: Fixel 连接矩阵
+
+```bash
+fixelconnectivity templates/fixel_mask templates/tracks_sift.tck templates/connectivity/
+```
+
+## Step 19: 平滑
+
+```bash
+fixelfilter fd/fd.mif smooth fd_smooth.mif \
+  -connectivity templates/connectivity/ \
+  -template templates/fixel_mask/ \
+  -kernel 10mm
+
+fixelfilter log_fc.mif smooth log_fc_smooth.mif \
+  -connectivity templates/connectivity/ \
+  -template templates/fixel_mask/ \
+  -kernel 10mm
+
+fixelfilter fdc.mif smooth fdc_smooth.mif \
+  -connectivity templates/connectivity/ \
+  -template templates/fixel_mask/ \
+  -kernel 10mm
+```
+
+## Step 20: 统计检验
+
+准备设计矩阵 `design.txt` 和对比矩阵 `contrast.txt`。
+
+设计矩阵示例（两组比较，每组 3 个被试）：
+
+```
+1 1 0    # sub-001 group A
+1 1 0    # sub-002 group A
+1 1 0    # sub-003 group A
+1 0 1    # sub-004 group B
+1 0 1    # sub-005 group B
+1 0 1    # sub-006 group B
+```
+
+对比矩阵示例（A vs B）：
+
+```
+0 1 -1
+```
+
+运行统计（CFE 参数可调）：
+
+```bash
+ fixelcfestats \
+  sub-*/fd_smooth.mif \
+  design.txt \
+  contrast.txt \
+  templates/fixel_mask/ \
+  templates/connectivity/ \
+  stats/fd/ \
+  -cfe_h 2.0 \
+  -cfe_e 0.5 \
+  -cfe_c 0.5 \
+  -nshifts 5000
+
+fixelcfestats \
+  sub-*/log_fc_smooth.mif \
+  design.txt \
+  contrast.txt \
+  templates/fixel_mask/ \
+  templates/connectivity/ \
+  stats/log_fc/
+
+fixelcfestats \
+  sub-*/fdc_smooth.mif \
+  design.txt \
+  contrast.txt \
+  templates/fixel_mask/ \
+  templates/connectivity/ \
+  stats/fdc/
+```
+
+关键参数：
+
+| 参数 | 说明 |
+|------|------|
+| `-nshifts` | 置换次数，默认 5000 |
+| `-connectivity` | 连接矩阵目录（Step 18 输出） |
+
+## Step 21: 可视化
+
+```bash
+mrview templates/fod_template.mif \
+  -fixel.load stats/fd/FD_smooth.mif
+```
+
+## 关键参数速查
+
+| 参数 | FBA 推荐值 | 说明 |
+|------|-----------|------|
+| 上采样体素 | 1.25mm | 匹配 Brainnetome 图谱 |
+| CSD 算法 | msmt_csd | 多组织多壳层 |
+| 响应函数 | dhollander | 自动估计 WM/GM/CSF |
+| 置换检验 | 5000 次 | 标准推荐 |
+| 平滑核 | 10mm FWHM | FBA 标准 |
+| 追踪纤维数 | 20M → SIFT 2M | 用于连接矩阵 |

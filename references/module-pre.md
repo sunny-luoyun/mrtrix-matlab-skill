@@ -1,59 +1,102 @@
-# pre — 预处理模块
+# 预处理 CLI 参考
 
-## 用途
+## 流程概述
 
-对整理后的 DWI 和 T1 数据进行标准化预处理，包括格式转换、去噪、校正、配准和组织分割。
+预处理是 DTI / FOD / 纤维追踪等所有下游分析的前置步骤。
 
-## 文件清单
+## 标准命令序列
 
-### prepro.m（App Designer 主界面）
+### 1. 格式转换（NIfTI → .mif）
 
-**入口函数**。运行后打开预处理参数配置界面，可勾选多个处理步骤，配置参数，批量处理多个被试。
+```bash
+# DWI 转换（需 bvecs/bvals 或 mrtrix 梯度格式）
+mrconvert dwi.nii.gz dwi.mif -fslgrad bvecs bvals -datatype float32
 
-**可勾选的步骤**（可按需组合）：
-1. 格式转换（DICOM/NIFTI → .mif）
-2. 去噪（dwidenoise）
-3. Gibbs 校正（mrdegibbs）
-4. 头动校正（含 eddy）
-5. B1 偏差场校正
-6. T1 配准到 MNI
-7. DWI 配准到 MNI
-8. T1 组织分割
+# 从 DICOM 目录直接转（推荐！mrconvert 直接读取 DICOM）
+mrconvert dicom_dir/ dwi.mif
+```
 
-### 单步函数
+### 2. 降噪（dwidenoise）
 
-| 函数 | 命令行 | 说明 |
-|------|--------|------|
-| `change_format` | `mrconvert` | DICOM/NIFTI → .mif |
-| `denoise` | `dwidenoise` | 扩散加权图像去噪 |
-| `gibbs` | `mrdegibbs` | Gibbs ringing 校正 |
-| `headmove` | `dwifslpreproc` | 头动 + 涡流校正（需 AP/PA b0） |
-| `bias` | `dwibiascorrect ants` | B1 偏差场校正 |
-| `mask` | `dwi2mask` + `maskfilter` | 脑掩膜生成 + 膨胀 |
-| `dwitoMNI` | `flirt` + `mrtransform` | DWI 线性配准到 MNI152 |
-| `T1toMNI` | `flirt` | T1 配准到 MNI152 |
-| `T1corg` | `5ttgen fsl` + `5tt2gmwmi` | T1 五组织分割 |
+```bash
+dwidenoise dwi.mif dwi_den.mif -noise noise.mif
+# noise.mif: 估计的噪声图，可用于质量评估
+```
 
-## 关键参数
+### 3. Gibbs 伪影消除
 
-### headmove（头动校正）
+```bash
+mrdegibbs dwi_den.mif dwi_den_unr.mif
+# 消除截断伪影（对高 b 值图像尤其重要）
+```
 
-- **AP 相位编码 b0**：需要提供 AP 方向的 b0 文件
-- **PA 相位编码 b0**：需要提供 PA 方向的 b0 文件
-- **无 AP/PA**：如果无 AP/PA b0 配对，此步骤不可用
+### 4. 脑掩膜
 
-### dwitoMNI（DWI 配准到 MNI）
+```bash
+dwi2mask dwi_den_unr.mif mask.mif
 
-- **T1 配准方式**：基于 T1 到 MNI 的配准矩阵，变换 DWI 到 MNI
-- **插值方式**：线性/样条
+# 可选：掩膜膨胀（确保覆盖所有脑组织）
+maskfilter mask.mif dilate mask_dilated.mif -npass 2
+```
 
-### T1corg（组织分割）
+### 5. 头动 + 涡流校正（eddy）
 
-- **输出**：5tt.mif（5 组织类型）+ gmwmi.mif（白质-灰质边界）
+需要 AP/PA 相位编码 b0 配对：
 
-## 处理建议
+```bash
+dwifslpreproc dwi_den_unr.mif dwi_den_unr_eddy.mif \
+  -rpe_pair \
+  -se_epi ap_b0.mif pa_b0.mif \
+  -pe_dir ap \
+  -eddy_options " --slm=linear --data_is_shelled"
+```
 
-1. 如果数据量大，建议先在单个被试上测试完整流程
-2. eddy（头动校正）是最耗时的步骤，建议 GPU 加速
-3. T1 组织分割和 DWI 配准可并行运行
-4. 所有预处理步骤输出均为 .mif 格式，保留原始数据不变
+无 AP/PA 对时跳过此步骤（eddy 无法运行）。
+
+### 6. B1 偏差场校正
+
+```bash
+dwibiascorrect ants dwi_den_unr_eddy.mif dwi_prepro.mif -mask mask.mif
+# 依赖 ANTs 中的 N4BiasFieldCorrection
+```
+
+### 7. T1 配准到 MNI（12 DOF）
+
+详见 `references/register.md`「阶段一：T1→MNI」。
+
+```bash
+# 7a. T1→MNI via flirt（12 DOF 仿射）
+mrconvert T1.mif T1.nii.gz -force
+flirt -in T1.nii.gz -ref Templates/MNI152.nii.gz -dof 12 -out T1_coreg.nii.gz -omat T1_to_MNI_fsl.mat
+transformconvert T1_to_MNI_fsl.mat T1.nii.gz Templates/MNI152.nii.gz flirt_import T1_to_MNI_mrtrix.txt -force
+mrtransform T1.nii.gz T1_MNI.nii.gz -linear T1_to_MNI_mrtrix.txt -template Templates/MNI152.nii.gz
+
+# 7b. DWI mean b0 → MNI via flirt（6 DOF 刚性）
+dwiextract dwi.mif - -bzero | mrmath - mean mean_b0.mif -axis 3 -force
+mrconvert mean_b0.mif mean_b0.nii.gz -force
+flirt -in mean_b0.nii.gz -ref Templates/MNI152.nii.gz -dof 6 -out dwi_coreg.nii.gz -omat dwi_to_MNI_fsl.mat
+transformconvert dwi_to_MNI_fsl.mat mean_b0.nii.gz Templates/MNI152.nii.gz flirt_import dwi_to_MNI_mrtrix.txt -force
+```
+
+### 8. 5TT 组织分割
+
+```bash
+5ttgen fsl T1.nii.gz 5tt.mif
+5tt2gmwmi 5tt.mif gmwmi.mif
+```
+
+## 可选步骤组合
+
+| 场景 | 必须步骤 | 可选步骤 |
+|------|---------|---------|
+| 仅 DTI | 格式转换 + 去噪 + Gibbs + 掩膜 | eddy、B1、flirt T1/DWI→MNI |
+| FOD + 纤维追踪 | 同上 + B1 | eddy、5TT |
+| FBA | 格式转换（不上采样前不做预处理） | —（FBA 有独立预处理）|
+
+## 质量检查
+
+```bash
+# 检查各步骤输出
+mrinfo dwi_prepro.mif
+mrview dwi_prepro.mif -overlay.load mask.mif
+```

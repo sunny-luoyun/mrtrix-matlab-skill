@@ -1,45 +1,83 @@
-# fod — 反卷积响应函数计算模块
+# FOD/CSD CLI 参考
 
-## 用途
+## 流程
 
-从预处理后的 DWI 数据估计响应函数，进行球面反卷积（CSD）计算纤维方向分布（FOD），并进行标准化和配准。
+预处理 DWI → `dwi2response` → `dwi2fod` → `mtnormalise`
 
-## 文件清单
+## 响应函数算法选择
 
-### fod.m（App Designer 主界面）
-
-**入口函数**。运行后选择响应函数算法和 CSD 算法，配置参数并批量计算。
-
-### 响应函数算法
-
-| 函数 | 对应命令 | 适用场景 | 输出 |
-|------|---------|---------|------|
-| `dhollander.m` | `dwi2response dhollander` | 多组织（WM/GM/CSF） | 3 个响应函数 |
-| `tournier.m` | `dwi2response tournier` | 仅 WM，自动选体素 | 1 个响应函数 |
-| `fa.m` | `dwi2response fa` | 仅 WM，FA 阈值选体素 | 1 个响应函数 |
-| `tax.m` | `dwi2response tax` | WM，Tax 算法 | 1 个响应函数 |
-| `msmt_5tt_tournier.m` | 5tt + tournier | 需要 T1corg 的 5tt 结果 | 多组织 |
-| `msmt_5tt_fa.m` | 5tt + FA | 需要 T1corg 的 5tt 结果 | 多组织 |
-| `msmt_5tt_tax.m` | 5tt + Tax | 需要 T1corg 的 5tt 结果 | 多组织 |
-
-### CSD 算法
-
-| 函数 | 对应命令 | 说明 |
+| 算法 | 适用场景 | 原理 |
 |------|---------|------|
-| `csd.m` | `dwi2fod csd` | 单组织 CSD，用 WM 响应函数 |
-| `msmt.m` | `dwi2fod msmt_csd` | 多组织 CSD，需 WM/GM/CSF 三个响应函数 |
+| `dhollander` | 多壳层，无 T1 | 全自动，利用多壳层信息区分 WM/GM/CSF |
+| `msmt_5tt` + `tournier` | 有 T1，T1 质量好 | 利用 5tt 分割约束组织 mask，tournier 迭代选 WM |
+| `msmt_5tt` + `tax` | 有 T1，T1 质量好 | 同上，用 tax 阈值法选 WM |
+| `msmt_5tt` + `fa` | 有 T1，T1 质量好 | 同上，用 FA 阈值选 WM（需调 FA 阈值） |
+| `tournier` | 单壳层，无 T1 | 迭代选择单纤维体素 |
+| `tax` | 单壳层/临床 | 快速阈值法 |
 
-### 后处理
+## dhollander（推荐，多壳层无 T1）
 
-| 函数 | 对应命令 | 说明 |
-|------|---------|------|
-| `normal.m` | `mtnormalise` | FOD 强度标准化，组分析必须 |
-| `fodtoMNI.m` | `mrtransform` | FOD 线性配准到 MNI152，带 `-reorient_fod yes` |
+```bash
+dwi2response dhollander dwi_prepro.mif wm.txt gm.txt csf.txt -mask mask.mif
+```
 
-## 推荐组合
+## msmt_5tt（5TT 引导，需 T1）
 
-| 数据情况 | 响应函数 | CSD | 标准化 | MNI |
-|---------|---------|-----|--------|-----|
-| 常规 DWI | dhollander | msmt_csd | 是 | 可选 |
-| 无多组织需求 | tournier | csd | 是 | 可选 |
-| 有 5tt 分割 | msmt_5tt_tournier | msmt_csd | 是 | 可选 |
+先由 5tt 分割提供组织先验，再用指定算法估计 WM 响应函数：
+
+```bash
+# 1. 生成 5tt
+5ttgen fsl T1.nii.gz 5tt.mif
+
+# 2. 5TT 引导响应函数估计（三种 WM 算法选一）
+# B1: tournier 迭代法
+dwi2response msmt_5tt dwi_prepro.mif wm.txt gm.txt csf.txt \
+  -mask mask.mif -5tt 5tt.mif -wm_algo tournier
+# B2: tax 阈值法
+# dwi2response msmt_5tt dwi_prepro.mif wm.txt gm.txt csf.txt \
+#   -mask mask.mif -5tt 5tt.mif -wm_algo tax
+# B3: FA 阈值法
+# dwi2response msmt_5tt dwi_prepro.mif wm.txt gm.txt csf.txt \
+#   -mask mask.mif -5tt 5tt.mif -wm_algo fa
+```
+
+## tournier / tax（单壳层，无 T1）
+
+```bash
+dwi2response tournier dwi_prepro.mif response.txt -mask mask.mif
+# dwi2response tax dwi_prepro.mif response.txt -mask mask.mif
+```
+
+## FOD 计算与标准化
+
+### 多组织 MSMT-CSD（与 dhollander / msmt_5tt 搭配）
+
+```bash
+dwi2fod msmt_csd dwi_prepro.mif \
+  wm.txt wm_fod.mif \
+  gm.txt gm.mif \
+  csf.txt csf.mif \
+  -mask mask.mif
+mtnormalise wm_fod.mif wm_fod_norm.mif \
+  gm.mif gm_norm.mif \
+  csf.mif csf_norm.mif \
+  -mask mask.mif
+```
+
+### 单组织 CSD（与 tournier / tax 搭配）
+
+```bash
+dwi2fod csd dwi_prepro.mif response.txt fod.mif -mask mask.mif
+mtnormalise fod.mif fod_norm.mif -mask mask.mif
+```
+
+## 质量检查
+
+```bash
+# 查看 FOD
+mrview wm_fod_norm.mif -mode 2
+shview wm_fod_norm.mif
+
+# 检查峰值
+sh2peaks wm_fod_norm.mif peaks.mif -num 3
+```

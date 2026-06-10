@@ -1,46 +1,57 @@
-# dti — 弥散指标计算模块
+# DTI CLI 参考
 
-## 用途
+## 流程
 
-从预处理后的 DWI 数据计算弥散张量和峰度张量指标，并将结果配准到 MNI 空间。
+预处理 DWI → `dwi2tensor` → `tensor2metric` → 复用 `dwi_to_MNI` 矩阵配准
 
-## 文件清单
+## 命令序列
 
-### dti.m（App Designer 主界面）
+```bash
+# 1. 张量拟合
+dwi2tensor dwi_prepro.mif dt.mif -mask mask.mif
 
-**入口函数**。运行后打开参数界面，勾选需要计算的指标，支持批量处理。
+# 2. 计算弥散指标
+tensor2metric dt.mif \
+  -fa fa.mif \
+  -ad ad.mif \
+  -rd rd.mif \
+  -adc adc.mif \
+  -cl cl.mif \
+  -cp cp.mif \
+  -cs cs.mif \
+  -mask mask.mif
 
-**可选指标**：
+# 3. (可选) DKI 指标
+dwi2tensor dwi_prepro.mif dkt.mif -mask mask.mif -dkt
+tensor2metric dkt.mif \
+  -mk mk.mif \
+  -ak ak.mif \
+  -rk rk.mif \
+  -mask mask.mif
+```
 
-| 指标 | 函数 | 对应命令 | 说明 |
-|------|------|---------|------|
-| DT | `dt.m` | `dwi2tensor` | 扩散张量 |
-| DKI | `dkt.m` | `dwi2tensor -dkt` | 扩散峰度张量 |
-| FA | `fa.m` | `tensor2metric -fa` | 各向异性分数 |
-| AD | `ad.m` | `tensor2metric -ad` | 轴向扩散率 |
-| RD | `rd.m` | `tensor2metric -rd` | 径向扩散率 |
-| ADC | `adc.m` | `tensor2metric -adc` | 表观扩散系数 |
-| CL | `cl.m` | `tensor2metric -cl` | 线性各向异性 |
-| CP | `cp.m` | `tensor2metric -cp` | 平面各向异性 |
-| CS | `cs.m` | `tensor2metric -cs` | 球形各向异性 |
-| AK | `ak.m` | `tensor2metric -ak` | 轴向峰度（需 DKI） |
-| MK | `mk.m` | `tensor2metric -mk` | 平均峰度（需 DKI） |
-| RK | `rk.m` | `tensor2metric -rk` | 径向峰度（需 DKI） |
+## 配准到 MNI
 
-### 其他函数
+详见 `references/register.md`「阶段一：线性配准到 MNI」。
 
-| 函数 | 说明 |
-|------|------|
-| `tensor2T1.m` | 将张量图像配准到 T1 空间 |
+**核心原则**：只配一次 `dwi→MNI`，所有 DTI 指标复用同一矩阵。
 
-## 处理流程
+```bash
+# 0. 先配准 DWI b0 → MNI（6 DOF，得到 dwi_to_MNI_mrtrix.txt）
+# 详见预处理模块 Step 7b
 
-1. `dt.m` 先拟合扩散张量 → `dkt.m` 再拟合峰度张量（若勾选 DKI）
-2. 逐个计算勾选的指标（FA/AD/RD 等），自动生成 MNI 空间结果
-3. 所有指标输出为 .nii 格式，在 MNI 空间
+# 1. 所有 DTI 指标批量变换（复用同一矩阵）
+for metric in fa ad rd adc cl cp cs ak mk rk; do
+  mrtransform ${metric}.mif ${metric}_MNI.nii.gz \
+    -linear dwi_to_MNI_mrtrix.txt \
+    -template Templates/MNI152.nii.gz \
+    -force
+done
+```
 
-## 参数建议
+## 方法对比（旧写法 vs 你的写法）
 
-- FA 阈值（用于 FA 算法选择体素）：默认 0.7
-- MNI 模板路径：`Templates/MNI152.nii.gz`
-- 如果不需要组分析，可跳过 MNI 配准
+| 方法 | 命令 | 说明 |
+|------|------|------|
+| ❌ 旧写法（我之前的 skill） | `mrregister -type affine` 每次现配 | 每个指标各自配准，重复计算且可能不一致 |
+| ✅ **你的写法** | `flirt` → `transformconvert` → `mrtransform -linear` | 一次配准，所有指标复用同一矩阵，空间完全对齐 |
