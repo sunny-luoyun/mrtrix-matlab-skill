@@ -20,6 +20,3 @@ ln -s $(pwd)/mrtrix-matlab-skill ~/.config/opencode/skills/mrtrix-matlab-skill
 
 或直接将 `SKILL.md` 和 `references/` 目录复制到 `~/.config/opencode/skills/` 下。
 
-## 许可证
-
-MIT
