@@ -1,5 +1,24 @@
 # mrtrix-matlab 扩散磁共振图像处理技能
 
+## 项目路径配置
+
+本技能需要知道 mrtrix-matlab 项目在你电脑上的位置才能工作。  
+请用文本编辑器打开本文件，将下方路径改为你的实际路径：
+
+```text
+MRTRIX_MATLAB_HOME = /path/to/your/mrtrix-matlab
+```
+
+例如：
+- macOS: `MRTRIX_MATLAB_HOME = /Users/me/code/mrtrix-matlab`
+- Linux: `MRTRIX_MATLAB_HOME = /home/me/mrtrix-matlab`
+- Windows: `MRTRIX_MATLAB_HOME = C:\Users\me\mrtrix-matlab`
+
+AI 每次读取本文件时会自动使用该路径。  
+**如果你换了电脑或移动了项目目录，记得更新这个路径。**
+
+---
+
 ## 触发条件
 
 当用户提及以下关键词时，自动触发本技能：
@@ -16,8 +35,9 @@
 
 使用本 skill 前，请先确保：
 1. 已克隆或下载上述项目到本地
-2. 已安装 MRtrix3、FSL、ANTs 等依赖工具
-3. 已按项目 README 配置好环境（运行 `setup_path` 添加路径，在 `env.m` 中设置各工具的本地安装路径）
+2. 已在本文件顶部的「项目路径配置」中填好了 `MRTRIX_MATLAB_HOME`
+3. 已安装 MRtrix3、FSL、ANTs 等依赖工具
+4. 已按项目 README 配置好环境（`cd MRTRIX_MATLAB_HOME` 后运行 `setup_path` 添加路径，编辑 `env.m` 设置各工具的本地安装路径）
 
 **架构**：由 8 个功能模块组成，通过 `mrtrix`（主入口）-> `fun`（弥散像处理二级菜单）的 App Designer GUI 串联：
 - `sort/` → 原始数据整理
@@ -89,7 +109,7 @@ sort（数据整理）→ pre（预处理）→ fod（FOD 计算）→ fiber（�
 1. **说明该步骤的目的** — 用简单语言解释这一步在做什么
 2. **询问关键参数** — 根据模块参考文档给出参数选项
 3. **引导执行** — 提供两种方式任选：
-   - **GUI 方式**：在 MATLAB 中运行对应的 App（如 `prepro` 打开预处理界面），指导用户填写参数
+   - **GUI 方式**：在 MATLAB 中先 `cd MRTRIX_MATLAB_HOME`，再运行对应的 App（如 `prepro` 打开预处理界面），指导用户填写参数
    - **函数方式**：直接给出需要调用的 MATLAB 函数及参数
 4. **产出确认** — 说明这一步会生成什么文件/结果
 5. **推进下一步** — 确认完成后询问是否继续下一步
@@ -98,7 +118,7 @@ sort（数据整理）→ pre（预处理）→ fod（FOD 计算）→ fiber（�
 
 在对话中自然嵌入以下规则：
 
-- **首次使用**：必须先运行 `setup_path` 添加路径，macOS 还需运行 `env.m` 设置环境变量
+- **首次使用**：必须先 `cd MRTRIX_MATLAB_HOME`，然后在 MATLAB 中运行 `setup_path` 添加路径，macOS 还需运行 `env.m` 设置环境变量
 - **新增模块**：如用户需要新建模块文件夹，必须同步更新 `setup_path.m` 中的 `folders` 列表
 - **数据备份**：预处理涉及数据覆盖性操作，建议先备份原始数据
 - **MRtrix3 依赖**：部分功能依赖 MRtrix3/FSL/ANTs 命令行工具，需先在系统安装（各工具路径在 `env.m` 中配置）
