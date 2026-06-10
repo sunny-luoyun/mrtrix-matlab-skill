@@ -1,6 +1,6 @@
 # mrtrix-matlab-skill
 
-MRtrix3 扩散磁共振图像处理的 [opencode](https://opencode.ai) skill。
+MRtrix3 扩散磁共振图像处理的skill。
 
 ## 使用前提
 
